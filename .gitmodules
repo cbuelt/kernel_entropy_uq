@@ -1,0 +1,3 @@
+[submodule "lightning-uq-box"]
+	path = lightning-uq-box
+	url = https://github.com/cbuelt/lightning-uq-box.git
