@@ -145,3 +145,10 @@ cython_debug/
  *.pyc
 
 wandb/
+.vscode/
+**lightning_logs/
+data/EUPPBench/
+data/uci/
+*.ckpt
+*.pkl
+plots/

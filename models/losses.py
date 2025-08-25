@@ -27,16 +27,31 @@ class NormalCRPS(nn.Module):
     def __init__(
         self,
         reduction: Optional[str] = "mean",
+        mask:bool = False,
+        ensemble:bool = False,
     ) -> None:
         super().__init__()
         self.reduction = reduction
+        self.mask = mask
+        self.ensemble = ensemble
 
     def forward(
         self,
         prediction: torch.Tensor,
         observation: torch.Tensor,
     ) -> torch.Tensor:
-        mu, sigma = torch.split(prediction, 1, dim=-1)
+
+        if self.mask: # For GNN
+            mask = ~torch.isnan(observation)
+            mu, sigma = torch.split(prediction, 1, dim=1)
+            observation = observation.unsqueeze(1)
+            mu = mu[mask]
+            sigma = sigma[mask]
+            observation = observation[mask]
+        else:
+            mu, sigma = torch.split(prediction, 1, dim=-1)
+        if self.ensemble:
+            observation = observation.unsqueeze(-1)
         loc = (observation - mu) / sigma
         cdf = 0.5 * (1 + torch.erf(loc / np.sqrt(2.0)))
         pdf = 1 / (np.sqrt(2.0 * np.pi)) * torch.exp(-torch.pow(loc, 2) / 2.0)

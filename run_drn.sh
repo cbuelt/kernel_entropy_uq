@@ -1,2 +1,2 @@
 #!/bin/sh
-python -m src.drn_ensemble
+python -m experiments.drn.drn_ensemble

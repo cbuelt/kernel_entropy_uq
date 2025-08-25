@@ -124,6 +124,9 @@ class WeatherBench(Dataset):
             int: Length of the dataset
         """
         return self.input_array.sizes["sample"]
+    
+    def get_grid(self):
+        return self.era5.longitude.values, self.era5.latitude.values
 
     def __getitem__(self, idx: int) -> tuple:
         """Returns the idx-th element of the dataset

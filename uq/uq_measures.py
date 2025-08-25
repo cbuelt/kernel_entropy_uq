@@ -13,7 +13,7 @@ class GaussianUQMeasure:
     ):
         self.variant = variant
         self.second_order = second_order
-        self.gamma = kwargs.get("gamma", 1.0)
+        self.gamma = kwargs.get("gamma", 0.1)
 
         # Check sizes
         if self.second_order == "ensemble":
@@ -71,7 +71,7 @@ class GaussianUQMeasure:
         eu = torch.sqrt(torch.pow(sigma, 2) + torch.pow(tau, 2)) * np.sqrt(
             2 / np.pi
         ) * f1 - (sigma + tau) / np.sqrt(np.pi)
-        diag_mask = 1 - torch.eye(3, dtype=eu.dtype, device=eu.device)
+        diag_mask = 1 - torch.eye(self.m, dtype=eu.dtype, device=eu.device)
         eu = eu * diag_mask
         eu = (eu.sum(dim=(-1, -2)) / self.corr).to(device)
         return au, eu
