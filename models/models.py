@@ -1,8 +1,18 @@
+# This file contains code adapted from:
+# "gnn-post-processing" by hits-mli
+# Repository: https://github.com/hits-mli/gnn-post-processing
+# Paper: Feik et al. Graph Neural Networks and Spatial Information Learning for Post-Processing Ensemble Weather Forecasts (2024)
+
+
 import torch.nn as nn
 import torch
 from torch import Tensor
-import lightning as L
-from models.losses import NormalCRPS
+import pytorch_lightning as L
+from sklearn.preprocessing import StandardScaler
+from typing import Tuple, List
+import numpy as np
+import pandas as pd
+from models.losses import NormalCRPS, SquaredError, NLL, GaussianKernelScore
 
 EPS = 1e-9
 
@@ -119,6 +129,170 @@ class LightningDRN(L.LightningModule):
         }
 
         return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}
+
+def normalize_features(
+    training_data: pd.DataFrame,
+    valid_test_data: List[Tuple[pd.DataFrame]],
+) -> Tuple[pd.DataFrame, List[Tuple[pd.DataFrame]]]:
+    """
+    Normalize the features in the training data and validation/test data. Also add the cos_doy and sin_doy features.
+
+    Args:
+        training_data (pd.DataFrame): The training data. Each Tuple contains the features and the target.
+        valid_test_data (List[Tuple[pd.DataFrame]]): The validation/test data.
+        Each Tuple contains the features and the target.
+
+    Returns:
+        Tuple[pd.DataFrame, List[Tuple[pd.DataFrame]]]: The normalized training data and validation/test data.
+    """
+
+    # Normalize Features ############################################################
+    # Select the features to normalize
+    print("[INFO] Normalizing features...")
+    train_rf = training_data[0]
+    features_to_normalize = [col for col in train_rf.columns if col not in ["station_id", "time", "number"]]
+
+    # Create a MinMaxScaler object
+    scaler = StandardScaler()
+
+    # Fit and transform the selected features
+    train_rf.loc[:, features_to_normalize] = scaler.fit_transform(train_rf[features_to_normalize]).astype("float32")
+
+    train_rf.loc[:, ["cos_doy"]] = np.cos(2 * np.pi * train_rf["time"].dt.dayofyear / 365)
+    train_rf.loc[:, ["sin_doy"]] = np.sin(2 * np.pi * train_rf["time"].dt.dayofyear / 365)
+    train_rf.drop(columns=["time", "number"], inplace=True)
+
+    for features, _ in valid_test_data:
+        features.loc[:, features_to_normalize] = scaler.transform(features[features_to_normalize]).astype("float32")
+        features.loc[:, ["cos_doy"]] = np.cos(2 * np.pi * features["time"].dt.dayofyear / 365)
+        features.loc[:, ["sin_doy"]] = np.sin(2 * np.pi * features["time"].dt.dayofyear / 365)
+        features.drop(columns=["time", "number"], inplace=True)
+
+    return training_data, valid_test_data
+
+
+def drop_nans(dfs: Tuple[pd.DataFrame, pd.DataFrame]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Drop rows with NaN values in the 't2m' column in the target Dataframe.
+
+    Args:
+        dfs (Tuple[pd.DataFrame, pd.DataFrame]): A tuple containing two DataFrames (Features and Target).
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing two DataFrames with rows containing
+            NaN values in the 't2m' column dropped.
+    """
+    nans = dfs[1]["t2m"].isna().reset_index(drop=True)
+    res = (dfs[0][~nans], dfs[1][~nans])
+    return res
+
+
+class EmbedStations(nn.Module):
+    """A module to embed station IDs into a feature vector.
+
+    Args:
+        num_stations_max (int): The maximum number of stations.
+        embedding_dim (int): The dimension of the embedding vector.
+
+    Attributes:
+        embed (nn.Embedding): The embedding layer.
+
+    """
+
+    def __init__(self, num_stations_max, embedding_dim):
+        super(EmbedStations, self).__init__()
+        self.embed = nn.Embedding(num_embeddings=num_stations_max, embedding_dim=embedding_dim)
+
+    def forward(self, x: torch.Tensor):
+        """Forward pass of the EmbedStations module.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            torch.Tensor: The output tensor after embedding the station IDs.
+
+        """
+        station_ids = x[..., 0].long()
+        emb_station = self.embed(station_ids)
+        x = torch.cat(
+            (emb_station, x[..., 1:]), dim=-1
+        )  # Concatenate embedded station_id to rest of the feature vector
+        return x
+
+
+class StationDRN(L.LightningModule):
+    """DRN from Rasp and Lerch - 2018 - Neural Networks for Postprocessing Ensemble Weathe.pdf"""
+
+    def __init__(self, embedding_dim, in_channels, hidden_channels, loss,optimizer_class, optimizer_params,**kwargs):
+        super(StationDRN, self).__init__()
+        
+        self.hidden_channels = hidden_channels
+        self.num_layers = len(hidden_channels)
+        self.optimizer_class = optimizer_class
+        self.optimizer_params = optimizer_params
+        self.gamma = kwargs.get("gamma",1.0)
+        
+
+        self.embedding = EmbedStations(num_stations_max=122, embedding_dim=embedding_dim)
+
+        self.linear = nn.ModuleList()
+        for hidden_size in self.hidden_channels:
+            self.linear.append(nn.Linear(in_features=in_channels, out_features=hidden_size))
+            in_channels = hidden_size
+        self.last_linear_mu = nn.Linear(in_features=in_channels, out_features=1)
+        self.last_linear_sigma = nn.Linear(in_features=in_channels, out_features=1)
+
+        self.relu = nn.ReLU()
+        self.softplus = nn.Softplus()
+        if loss == "crps":
+            self.loss_fn = NormalCRPS()
+        elif loss == "se":
+            self.loss_fn = SquaredError()
+        elif loss == "kernel":
+            self.loss_fn = GaussianKernelScore(gamma = self.gamma)
+        elif loss == "log":
+            self.loss_fn = NLL()
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.embedding(x)
+        for layer in self.linear:
+            x = layer(x)
+            x = self.relu(x)
+        mu = self.last_linear_mu(x)  # Last Layer without ReLU
+        sigma = self.softplus(self.last_linear_sigma(x)) + EPS
+        res = torch.cat([mu, sigma], dim=1)
+        return res
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self.forward(x)
+        loss = self.loss_fn(prediction=y_hat, observation=y)
+        self.log("train_loss", loss.item(), on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        return self.optimizer_class(self.parameters(), **self.optimizer_params)
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self.forward(x)
+        loss = self.loss_fn(prediction=y_hat, observation=y)
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        return loss
+
+    def test_step(self, batch, batch_idx, dataloader_idx=0):
+        x, y = batch
+        y_hat = self.forward(x)
+        loss = self.loss_fn(prediction=y_hat, observation=y)
+        self.log("test_loss", loss, on_epoch=True, prog_bar=True)
+        return loss
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        x, _ = batch
+        y_hat = self.forward(x)
+        return y_hat
 
 
 if __name__ == "__main__":

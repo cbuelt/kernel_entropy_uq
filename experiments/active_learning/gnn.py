@@ -9,7 +9,6 @@ import time
 import argparse
 
 import numpy as np
-import pandas as pd
 import pytorch_lightning as L
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -92,7 +91,7 @@ def get_model(config, graphs_train_rf):
 
 def get_ensemble_pred(model, model_path, dataloader):
     trainer = L.Trainer(
-        log_every_n_steps=1, accelerator="gpu", devices=1, enable_progress_bar=True
+        log_every_n_steps=1, accelerator="gpu", devices=1, enable_progress_bar=False
     )
     preds_list = []
     for ckpt_path in os.listdir(model_path):
@@ -125,7 +124,7 @@ def train_ensemble_member(model, temp_path, ensemble_id, round, dataloader):
         log_every_n_steps=1,
         accelerator="gpu",
         devices=1,
-        enable_progress_bar=True,
+        enable_progress_bar=False,
         callbacks=checkpoint_callback,
     )
     if round > 0: # Load checkpoint from previous round
@@ -141,12 +140,12 @@ if __name__ == "__main__":
     argparser.add_argument("-measure", type=str, default="log")
     args = argparser.parse_args()
 
-    RUNS = 5
+    RUNS = 1 #3
     ROUNDS = 20
-    N_MEMBERS = 10
+    N_MEMBERS = 5 #10
     EPOCHS = 3
-    START_SAMPLES = 100
-    NEW_SAMPLES = 100
+    START_SAMPLES = 100 #50
+    NEW_SAMPLES = 100 #50
     MEASURE = args.measure
     criterion = NormalCRPS(mask = True, ensemble = True, reduction = None)
     loss = np.empty((RUNS, ROUNDS, 2))
@@ -237,4 +236,4 @@ if __name__ == "__main__":
     results_dir = "results/active_learning/results/"
     os.makedirs(results_dir, exist_ok = True)
     np.save(f"{results_dir}{MEASURE}.npy", loss)
-    os.system("rm -rf "+temp_base_path)
+    #os.system("rm -rf "+temp_base_path)

@@ -168,7 +168,7 @@ if __name__ == "__main__":
     data_path = "data/uci/"
     os.makedirs(data_path, exist_ok=True)
     experiments = ["energy", "concrete", "yacht"]
-    results_path = "results/robustness/results/"
+    results_path = "results/robustness/results/ensemble/"
     os.makedirs(results_path, exist_ok=True)
 
     # Ensemble configuration
@@ -185,13 +185,13 @@ if __name__ == "__main__":
         ckpt_path = f"results/robustness/checkpoints/{experiment}/"
         os.makedirs(ckpt_path, exist_ok=True)
         # General ensemble training
-        #for ensemble_id in range(n_ensembles):
-           # print(f"Training {experiment} with ensemble ID {ensemble_id}")
-            #train_uci(data_path, experiment, ensemble_id, ckpt_path, train_size, batch_size, lr, epochs)
+        for ensemble_id in range(n_ensembles):
+            print(f"Training {experiment} with ensemble ID {ensemble_id}")
+            train_uci(data_path, experiment, ensemble_id, ckpt_path, train_size, batch_size, lr, epochs)
         # Distorted training
-       # for dist in distortion:
-           # print(f"Training {experiment} with distortion {dist}")
-            #train_uci(data_path, experiment, ensemble_id, ckpt_path, train_size, batch_size, lr, epochs, train_distortion=dist)
+        for dist in distortion:
+            print(f"Training {experiment} with distortion {dist}")
+            train_uci(data_path, experiment, ensemble_id, ckpt_path, train_size, batch_size, lr, epochs, train_distortion=dist)
 
         # Evaluate
         eval_uci(

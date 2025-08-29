@@ -1,0 +1,2 @@
+Leadtime: 24h
+Final crps: 0.634863555431366

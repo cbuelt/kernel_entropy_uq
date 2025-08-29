@@ -1,3 +1,9 @@
+# This file contains code adapted from:
+# "gnn-post-processing" by hits-mli
+# Repository: https://github.com/hits-mli/gnn-post-processing
+# Paper: Feik et al. Graph Neural Networks and Spatial Information Learning for Post-Processing Ensemble Weather Forecasts (2024)
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
