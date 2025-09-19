@@ -41,16 +41,11 @@ if __name__ == "__main__":
         "only_summary": "True",
     }
 
-    LOSS = args.loss
+    LOSS = "test"#args.loss
     GAMMA = 1
     N_ENSEMBLES = 10
 
-    loss_dict = {
-        "crps": NormalCRPS(reduction=None),
-        "log": NLL(reduction=None),
-        "se": SquaredError(reduction=None),
-        "kernel": GaussianKernelScore(reduction=None, gamma=GAMMA),
-    }
+
 
     dt = time.time()
     base_path = f"results/active_learning/{LOSS}/"
@@ -154,10 +149,8 @@ if __name__ == "__main__":
     )
     test_pred = torch.cat([mu, sigma], dim=1)
 
-    # Task loss and final loss
-    task_loss = loss_dict[LOSS]
-    loss = task_loss(test_pred, targets.unsqueeze(1))
-    np.save(base_path + f"{LOSS}.npy", loss)
+    # Save targets
+    np.save(base_path + f"targets.npy", targets)
 
     res = final_loss(test_pred, targets.unsqueeze(1))
     print("#############################################")

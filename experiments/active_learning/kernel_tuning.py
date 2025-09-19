@@ -141,15 +141,16 @@ def train_ensemble_member(model, ckpt_path, ensemble_id, round, dataloader):
 
 
 if __name__ == "__main__":
+    RUNS = 3
     ROUNDS = 40
-    N_MEMBERS = 5
-    EPOCHS = 3
+    N_MEMBERS = 10
+    EPOCHS = 2
     START_SAMPLES = 200
     NEW_SAMPLES = 200
     MEASURE = "kernel"
-    GAMMAS = np.arange(0, 2.2, 0.2)
+    GAMMAS = np.arange(0.1, 2.1, 0.1)
     criterion = NormalCRPS(reduction = None)
-    loss = np.empty((ROUNDS, 2))
+
 
     # Setup experiment
     config, leadtime, base_path, results_path = setup_experiment()
@@ -168,85 +169,90 @@ if __name__ == "__main__":
     )
     n_samples = train_array.shape[0]
 
-    # Set seed
-    torch.manual_seed(0)
-    np.random.seed(0)
-    # Configure permutations
-    perm = np.random.permutation(n_samples)
 
     # Iterate over gammas
     for gamma in GAMMAS:
         # Create checkpoint path
-        ckpt_base_path = os.path.join(base_path, f"checkpoints/")
-        os.makedirs(ckpt_base_path)
+        ckpt_gamma_path = os.path.join(base_path, f"checkpoints/")
+        if os.path.exists(ckpt_gamma_path):
+            os.system("rm -rf " + ckpt_gamma_path)
+        os.makedirs(ckpt_gamma_path)
 
-        # Get boolean lists
-        train_index = perm[0:START_SAMPLES]
-        pool_index = perm[START_SAMPLES:]
-        x_pool = train_array[pool_index]
+        loss = np.empty((RUNS, ROUNDS, 2))
 
-        # Take time
-        start_time = time.time()
+        for run in range(RUNS):
 
-        # Create temp dir
-        # Reduce data
-        for round in range(ROUNDS):
-            # Define train loader with subset
-            x_train = train_array[train_index]
-            y_train = y_scaler.transform(train_targets[["t2m"]])[train_index]
-            y_pool = y_scaler.transform(train_targets[["t2m"]])[pool_index]
+            # Creat path
+            ckpt_base_path = ckpt_gamma_path + f"run_{run}/"
+            os.makedirs(ckpt_base_path)
 
-            train_dataset = TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train))
-            pool_dataset = TensorDataset(torch.Tensor(x_pool), torch.Tensor(y_pool))
+            # Set seed
+            torch.manual_seed(run)
+            np.random.seed(run)
+            # Configure permutations
+            perm = np.random.permutation(n_samples)
 
-            train_loader = DataLoader(
-                train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=1
-            )
-            pool_loader = DataLoader(
-                pool_dataset, batch_size=config["batch_size"], shuffle=False, num_workers=1
-            )
+            # Get boolean lists
+            train_index = perm[0:START_SAMPLES]
+            pool_index = perm[START_SAMPLES:]
+            x_pool = train_array[pool_index]
 
-            # Create checkpoint path
-            ckpt_path = os.path.join(ckpt_base_path, f"round_{round}")
-            os.makedirs(ckpt_path)
 
-            for m in range(N_MEMBERS):
-                # Train model for x epochs
-                model = get_model(config, train_array, gamma)
-                train_ensemble_member(model, ckpt_base_path, m, round, train_loader)
+            # Create temp dir
+            # Reduce data
+            for round in range(ROUNDS):
+                # Define train loader with subset
+                x_train = train_array[train_index]
+                y_train = y_scaler.transform(train_targets[["t2m"]])[train_index]
+                y_pool = y_scaler.transform(train_targets[["t2m"]])[pool_index]
 
-            # Predict test loader
-            test_pred = get_ensemble_pred(
-                model=model, model_path=ckpt_path, dataloader=test_loader
-            )
-            # Create ensemble prediction
-            mu = test_pred[:,0:1].mean(dim = -1)
-            sigma = torch.sqrt(test_pred[:,1:2].mean(dim = -1) + torch.var(test_pred[:,0:1], dim = -1))
-            test_pred = torch.cat([mu, sigma], dim = 1)
-            # Evaluate metrics on test set and log
-            res = criterion(test_pred, y_test)
-            loss[round, :] = res.mean(), res.var()
+                train_dataset = TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train))
+                pool_dataset = TensorDataset(torch.Tensor(x_pool), torch.Tensor(y_pool))
 
-            if round < ROUNDS - 1:
-                # Predict train set and get epistemic uncertainty measure
-                train_pred = get_ensemble_pred(
-                    model=model, model_path=ckpt_path, dataloader=pool_loader
+                train_loader = DataLoader(
+                    train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=1
                 )
-                # EU
-                uq_measure = GaussianUQMeasure(train_pred, gamma=gamma)
-                _, eu, _ = uq_measure.get_uncertainties(measure=MEASURE)
+                pool_loader = DataLoader(
+                    pool_dataset, batch_size=config["batch_size"], shuffle=False, num_workers=1
+                )
 
-                # Sort indices and select pool
-                indices = np.argsort(eu)
-                train_indices = indices[-NEW_SAMPLES:]
-                train_index = np.concatenate([train_index, train_indices])
-                pool_index = indices[:-NEW_SAMPLES]
-                x_pool = x_pool[pool_index]
+                # Create checkpoint path
+                ckpt_path = os.path.join(ckpt_base_path, f"round_{round}")
+                os.makedirs(ckpt_path)
 
-        # Evaluation time
-        end_time = time.time() - start_time
-        print(f"Training took {end_time:.4f}s")
-        print(loss)
+                for m in range(N_MEMBERS):
+                    # Train model for x epochs
+                    model = get_model(config, train_array, gamma)
+                    train_ensemble_member(model, ckpt_base_path, m, round, train_loader)
 
-        np.save(f"{results_path}kernel_{gamma}.npy", loss)
+                # Predict test loader
+                test_pred = get_ensemble_pred(
+                    model=model, model_path=ckpt_path, dataloader=test_loader
+                )
+                # Create ensemble prediction
+                mu = test_pred[:,0:1].mean(dim = -1)
+                sigma = torch.sqrt(test_pred[:,1:2].mean(dim = -1) + torch.var(test_pred[:,0:1], dim = -1))
+                test_pred = torch.cat([mu, sigma], dim = 1)
+                # Evaluate metrics on test set and log
+                res = criterion(test_pred, y_test)
+                loss[run,round, :] = res.mean(), res.var()
+
+                if round < ROUNDS - 1:
+                    # Predict train set and get epistemic uncertainty measure
+                    train_pred = get_ensemble_pred(
+                        model=model, model_path=ckpt_path, dataloader=pool_loader
+                    )
+                    # EU
+                    uq_measure = GaussianUQMeasure(train_pred, gamma=gamma)
+                    _, eu, _ = uq_measure.get_uncertainties(measure=MEASURE)
+
+                    # Sort indices and select pool
+                    indices = np.argsort(eu)
+                    train_indices = indices[-NEW_SAMPLES:]
+                    train_index = np.concatenate([train_index, train_indices])
+                    pool_index = indices[:-NEW_SAMPLES]
+                    x_pool = x_pool[pool_index]
+
+
+        np.save(f"{results_path}kernel_{gamma:.1f}.npy", loss)
         os.system("rm -rf " + ckpt_path)
