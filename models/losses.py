@@ -1,18 +1,31 @@
+# Implementation of several loss functions
+
 from typing import Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from torch.distributions.normal import Normal
 
 EPS = 1e-9
 
+
 class GaussianKernelScore(nn.Module):
+    """Implementation of the Gaussian kernel score for Gaussian RVs."""
+
     def __init__(
         self,
-        gamma:float,
+        gamma: float,
         reduction: Optional[str] = "mean",
-        ensemble:bool = False,
+        ensemble: bool = False,
     ) -> None:
+        """Initialize class.
+
+        Args:
+            gamma (float): Kernel bandwidth
+            reduction (Optional[str], optional):  Defaults to "mean".
+            ensemble (bool, optional): Whether prediction has an additional dimension. Defaults to False.
+        """
         super().__init__()
         self.reduction = reduction
         self.ensemble = ensemble
@@ -23,7 +36,6 @@ class GaussianKernelScore(nn.Module):
         prediction: torch.Tensor,
         observation: torch.Tensor,
     ) -> torch.Tensor:
-
         mu, sigma = torch.split(prediction, 1, dim=-1)
         if self.ensemble:
             observation = observation.unsqueeze(-1)
@@ -34,9 +46,7 @@ class GaussianKernelScore(nn.Module):
         mu = torch.flatten(mu, start_dim=1)
         sigma2 = torch.flatten(sigma2, start_dim=1)
         observation = torch.flatten(observation, start_dim=1)
-        gamma = (
-            torch.tensor(self.gamma, device=mu.device)
-        )
+        gamma = torch.tensor(self.gamma, device=mu.device)
         gamma2 = torch.pow(gamma, 2)
         # Calculate the Gaussian kernel score
         fac1 = (
@@ -54,12 +64,21 @@ class GaussianKernelScore(nn.Module):
         else:
             return score
 
+
 class NLL(nn.Module):
+    """Implementation of the negative log likelihood for Gaussian RVs."""
+
     def __init__(
         self,
         reduction: Optional[str] = "mean",
-        ensemble:bool = False,
+        ensemble: bool = False,
     ) -> None:
+        """Initialize class.
+
+        Args:
+            reduction (Optional[str], optional):  Defaults to "mean".
+            ensemble (bool, optional): Whether prediction has an additional dimension. Defaults to False.
+        """
         super().__init__()
         self.reduction = reduction
         self.ensemble = ensemble
@@ -69,13 +88,12 @@ class NLL(nn.Module):
         prediction: torch.Tensor,
         observation: torch.Tensor,
     ) -> torch.Tensor:
-
         mu, sigma = torch.split(prediction, 1, dim=-1)
         if self.ensemble:
             observation = observation.unsqueeze(-1)
 
-        norm = Normal(loc = mu, scale = sigma)
-        score = (-1)*norm.log_prob(observation)
+        norm = Normal(loc=mu, scale=sigma)
+        score = (-1) * norm.log_prob(observation)
         if self.reduction == "sum":
             return torch.sum(score)
         elif self.reduction == "mean":
@@ -83,12 +101,21 @@ class NLL(nn.Module):
         else:
             return score
 
+
 class SquaredError(nn.Module):
+    """Implementation of the squared error for RVs."""
+
     def __init__(
         self,
         reduction: Optional[str] = "mean",
-        ensemble:bool = False,
+        ensemble: bool = False,
     ) -> None:
+        """Initialize class.
+
+        Args:
+            reduction (Optional[str], optional):  Defaults to "mean".
+            ensemble (bool, optional): Whether prediction has an additional dimension. Defaults to False.
+        """
         super().__init__()
         self.reduction = reduction
         self.ensemble = ensemble
@@ -98,7 +125,6 @@ class SquaredError(nn.Module):
         prediction: torch.Tensor,
         observation: torch.Tensor,
     ) -> torch.Tensor:
-
         mu, sigma = torch.split(prediction, 1, dim=-1)
         if self.ensemble:
             observation = observation.unsqueeze(-1)
@@ -111,30 +137,21 @@ class SquaredError(nn.Module):
         else:
             return score
 
+
 class NormalCRPS(nn.Module):
-    """Computes the continuous ranked probability score (CRPS)
-       for a predictive normal distribution and corresponding observations.
-
-    Args:
-        observation (torch.Tensor): Observed outcome. Shape = [batch_size, d0, .. dn].
-        mu (torch.Tensor): Predicted mu of normal distribution. Shape = [batch_size, d0, .. dn].
-        sigma2 (torch.Tensor): Predicted sigma2 of normal distribution. Shape = [batch_size, d0, .. dn].
-        reduce (bool, optional): Boolean value indicating whether reducing the loss to one value or to
-            a torch.Tensor with shape = `[batch_size]`.
-        reduction (str, optional): Specifies the reduction to apply to the output:
-            ``'mean'`` | ``'sum'``.
-    Raises:
-        ValueError: If sizes of target mu and sigma don't match.
-
-    Returns:
-        CRPS: 1-D float `torch.Tensor` with shape [batch_size] if reduction = True
-    """
+    """Implementation of the CRPS for Gaussian RVs."""
 
     def __init__(
         self,
         reduction: Optional[str] = "mean",
-        ensemble:bool = False,
+        ensemble: bool = False,
     ) -> None:
+        """Initialize class.
+
+        Args:
+            reduction (Optional[str], optional):  Defaults to "mean".
+            ensemble (bool, optional): Whether prediction has an additional dimension. Defaults to False.
+        """
         super().__init__()
         self.reduction = reduction
         self.ensemble = ensemble
@@ -144,7 +161,6 @@ class NormalCRPS(nn.Module):
         prediction: torch.Tensor,
         observation: torch.Tensor,
     ) -> torch.Tensor:
-
         if self.ensemble:
             mu, sigma = torch.split(prediction, 1, dim=1)
             observation = observation.unsqueeze(-1)
@@ -160,3 +176,64 @@ class NormalCRPS(nn.Module):
             return torch.mean(crps)
         else:
             return crps
+
+
+class DERLoss(nn.Module):
+    """Deep Evidential Regression Loss.
+
+    Taken from `here <https://github.com/pasteurlabs/unreasonable_effective_der/blob/main/models.py#L61>`_. # noqa: E501
+
+    This implements the loss corresponding to equation 12
+    from the `paper <https://arxiv.org/abs/2205.10060>`_.
+
+    If you use this model in your work, please cite:
+
+    * https://arxiv.org/abs/2205.10060
+    """
+
+    def __init__(self, coeff: float = 0.01) -> None:
+        """Initialize a new instance of the loss function.
+
+        Args:
+          coeff: loss function coefficient
+        """
+        super().__init__()
+        self.coeff = coeff
+
+    def NIG_NLL(self, y, gamma, nu, alpha, beta, reduce=True):
+        twoBlambda = 2 * beta * (1 + nu)
+
+        nll = (
+            0.5 * torch.log(np.pi / nu)
+            - alpha * torch.log(twoBlambda)
+            + (alpha + 0.5) * torch.log(nu * (y - gamma) ** 2 + twoBlambda)
+            + torch.lgamma(alpha)
+            - torch.lgamma(alpha + 0.5)
+        )
+
+        return torch.mean(nll) if reduce else nll
+
+    def NIG_Reg(self, y, gamma, nu, alpha, beta, reduce=True):
+        error = torch.abs(y - gamma)
+        evi = 2 * nu + (alpha)
+        reg = error * evi
+
+        return torch.mean(reg) if reduce else reg
+
+    def forward(self, pred, y_true):
+        """DER Loss.
+
+        Args:
+          logits: predicted tensor from model [batch_size x 4 x other dims]
+          y_true: true regression target of shape [batch_size x 1 x other dims]
+
+        Returns:
+          DER loss
+        """
+        assert pred.shape[-1] == 4, (
+            "logits should have shape [batch_size x 4 x other dims]"
+        )
+        gamma, nu, alpha, beta = torch.split(pred, 1, dim=-1)
+        loss_nll = self.NIG_NLL(y_true, gamma, nu, alpha, beta)
+        loss_reg = self.NIG_Reg(y_true, gamma, nu, alpha, beta)
+        return loss_nll + self.coeff * loss_reg

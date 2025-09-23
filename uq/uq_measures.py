@@ -1,9 +1,13 @@
-import torch
+# Implements the different uncertainty measures for a Gaussian ensemble.
+
 import numpy as np
+import torch
 from scipy.special import hyp1f1
 
 
 class GaussianUQMeasure:
+    """Uncertainty measure for first-order Gaussian"""
+
     def __init__(
         self,
         prediction: torch.Tensor,
@@ -11,6 +15,17 @@ class GaussianUQMeasure:
         second_order="ensemble",
         **kwargs,
     ):
+        """Initialize class
+
+        Args:
+            prediction (torch.Tensor): Prediction tensor.
+            variant (str, optional): Pairwise or BMA variant. Defaults to "pairwise".
+            second_order (str, optional): _description_. Defaults to "ensemble".
+
+        Raises:
+            ValueError: second_order method must be "ensemble"
+            ValueError: Parediction must have shape [B, d1, ... dN, 2, M].
+        """
         self.variant = variant
         self.second_order = second_order
         self.gamma = kwargs.get("gamma", 0.1)
@@ -33,7 +48,18 @@ class GaussianUQMeasure:
         else:
             raise ValueError("Invalid second order method")
 
-    def get_uncertainties(self, measure: str = "crps"):
+    def get_uncertainties(self, measure: str = "crps") -> tuple:
+        """Returns TU,AU,EU for a specific uncertainty measure.
+
+        Args:
+            measure (str, optional): Defaults to "crps".
+
+        Raises:
+            ValueError: Measure must be one of ["crps", "kernel", "log", "var"]
+
+        Returns:
+            tuple: (AU,EU,TU)
+        """
         if measure == "crps":
             au, eu = self._get_crps_uncertainty()
         elif measure == "kernel":
@@ -124,7 +150,7 @@ class GaussianUQMeasure:
 
 
 if __name__ == "__main__":
-    pred = torch.rand(10, 5, 6, 2, 3)*100  # Example mu tensor
+    pred = torch.rand(10, 5, 6, 2, 3) * 100  # Example mu tensor
     pred2 = torch.rand(10, 2, 3)  # Example mu2 tensor
     uq = GaussianUQMeasure(pred)
     uq2 = GaussianUQMeasure(pred2)
@@ -133,4 +159,4 @@ if __name__ == "__main__":
         au, eu, tu = uq.get_uncertainties(measure=measure)
         au2, eu2, tu2 = uq2.get_uncertainties(measure=measure)
         print(au.mean(), eu.mean(), tu.mean())
-        #print(au2.mean(), eu2.mean(), tu2.mean())
+        # print(au2.mean(), eu2.mean(), tu2.mean())

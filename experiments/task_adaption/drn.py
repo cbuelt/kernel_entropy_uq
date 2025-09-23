@@ -1,10 +1,10 @@
+# Run the DRN task loss adaption experiment.
+
 import argparse
-import json
 import os
 import time
 
 import numpy as np
-import pandas as pd
 import pytorch_lightning as L
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -14,10 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from data import load_dataframes, summary_statistics
 from models import (
-    NLL,
-    GaussianKernelScore,
     NormalCRPS,
-    SquaredError,
     StationDRN,
     drop_nans,
     normalize_features,
@@ -41,11 +38,9 @@ if __name__ == "__main__":
         "only_summary": "True",
     }
 
-    LOSS = "test"#args.loss
+    LOSS = "crps"
     GAMMA = 1
     N_ENSEMBLES = 10
-
-
 
     dt = time.time()
     base_path = f"results/active_learning/{LOSS}/"

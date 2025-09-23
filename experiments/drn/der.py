@@ -1,4 +1,4 @@
-# Implementation of the DRN ensemble prediction model.
+# Implementation of the DRN deep evidential regression.
 
 import datetime
 import os
@@ -14,14 +14,14 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import WandbLogger
 
 from data import WeatherBenchModule
-from models import EmbeddingMLP, LightningDRN
+from models import EmbeddingMLP, LightningDER
 
 
-def train(id: int = 0):
-    seed_everything(id)
+def train(coeff: float = 0.01):
+    seed_everything(0)
     d_time = datetime.datetime.now().strftime("_%Y%m%d_%H%M%S")
-    identifier = "mlp_" + str(id)
-    ckpt_path = "results/drn/ensemble/checkpoints"
+    identifier = f"mlp_{coeff}"
+    ckpt_path = "results/drn/der/checkpoints"
     os.makedirs(ckpt_path, exist_ok=True)
     wandb.init(
         project="kernel-entropy",
@@ -29,9 +29,9 @@ def train(id: int = 0):
     )
     logger = WandbLogger(project="kernel-entropy")
 
-    dm = WeatherBenchModule(train_batch_size=1024, num_workers=8)
-    mlp = EmbeddingMLP()
-    model = LightningDRN(mlp)
+    dm = WeatherBenchModule(train_batch_size=1024, num_workers=6)
+    mlp = EmbeddingMLP(n_outputs=4)
+    model = LightningDER(mlp, coeff=coeff)
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=ckpt_path,
@@ -60,6 +60,4 @@ def train(id: int = 0):
 
 
 if __name__ == "__main__":
-    ensembles = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    for e in ensembles:
-        train(e)
+    train(coeff=1.0)

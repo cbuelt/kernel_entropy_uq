@@ -1,3 +1,5 @@
+# Run the UCI robustness experiment.
+
 import os
 from functools import partial
 
@@ -6,13 +8,10 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from lightning import Trainer
-from lightning.pytorch import seed_everything
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning_uq_box.datamodules import UCIRegressionDatamodule
-from lightning_uq_box.datasets import UCIConcrete, UCIEnergy, UCIYacht
 from lightning_uq_box.models import MLP
 from lightning_uq_box.uq_methods import DeepEnsembleRegression, MVERegression
-
 
 from uq import GaussianUQMeasure
 
@@ -77,7 +76,7 @@ def eval_uci(
     distortion,
     ckpt_path,
     train_size,
-    **kwargs
+    **kwargs,
 ):
     gamma = kwargs.get("gamma", 1.0)
     # Setup data
@@ -107,15 +106,17 @@ def eval_uci(
 
     # Iterate through different number of ensembles
     for n_ensembles in n_eval_ensembles:
-
         base_ensemble = [
-            {"base_model": model, "ckpt_path": f"{ckpt_path}{experiment_name}_{np.round(x,1)}.ckpt"}
+            {
+                "base_model": model,
+                "ckpt_path": f"{ckpt_path}{experiment_name}_{np.round(x, 1)}.ckpt",
+            }
             for x in range(n_ensembles)
         ]
         robustness_members = [
             {
                 "base_model": model,
-                "ckpt_path": f"{ckpt_path}{experiment_name}_distorted_{np.round(x,1)}.ckpt",
+                "ckpt_path": f"{ckpt_path}{experiment_name}_distorted_{np.round(x, 1)}.ckpt",
             }
             for x in distortion
         ]
@@ -127,7 +128,6 @@ def eval_uci(
         log_sigma_2 = base_pred[:, 1]
         eps = torch.ones_like(log_sigma_2) * 1e-6
         base_pred[:, 1] = torch.sqrt(eps + np.exp(log_sigma_2))
-
 
         for i in range(len(distortion)):
             # Add distorted member
@@ -141,10 +141,10 @@ def eval_uci(
             pred[:, 1] = torch.sqrt(eps + np.exp(log_sigma_2))
 
             for measure in measures:
-                base_uq_measure = GaussianUQMeasure(base_pred, gamma = gamma)
+                base_uq_measure = GaussianUQMeasure(base_pred, gamma=gamma)
                 base_au, _, _ = base_uq_measure.get_uncertainties(measure)
 
-                uq_measure = GaussianUQMeasure(pred, gamma = gamma)
+                uq_measure = GaussianUQMeasure(pred, gamma=gamma)
                 au, _, _ = uq_measure.get_uncertainties(measure)
 
                 rel_au = torch.abs((au - base_au) / base_au).mean()
@@ -173,12 +173,12 @@ if __name__ == "__main__":
 
     # Ensemble configuration
     n_ensembles = 25
-    n_eval_ensembles = [5,25]
+    n_eval_ensembles = [5, 25]
 
     # Robustness configuration
-    distortion = np.concatenate([np.arange(0.0,2.0,0.1),np.arange(2.0, 5.5, 0.5)])
+    distortion = np.concatenate([np.arange(0.0, 2.0, 0.1), np.arange(2.0, 5.5, 0.5)])
     measures = ["log", "var", "crps", "kernel"]
-    gamma_values = {"concrete":0.00095, "energy":0.0033, "yacht":0.0036}
+    gamma_values = {"concrete": 0.00095, "energy": 0.0033, "yacht": 0.0036}
 
     # Train
     for experiment in experiments:
@@ -187,11 +187,30 @@ if __name__ == "__main__":
         # General ensemble training
         for ensemble_id in range(n_ensembles):
             print(f"Training {experiment} with ensemble ID {ensemble_id}")
-            train_uci(data_path, experiment, ensemble_id, ckpt_path, train_size, batch_size, lr, epochs)
+            train_uci(
+                data_path,
+                experiment,
+                ensemble_id,
+                ckpt_path,
+                train_size,
+                batch_size,
+                lr,
+                epochs,
+            )
         # Distorted training
         for dist in distortion:
             print(f"Training {experiment} with distortion {dist}")
-            train_uci(data_path, experiment, ensemble_id, ckpt_path, train_size, batch_size, lr, epochs, train_distortion=dist)
+            train_uci(
+                data_path,
+                experiment,
+                ensemble_id,
+                ckpt_path,
+                train_size,
+                batch_size,
+                lr,
+                epochs,
+                train_distortion=dist,
+            )
 
         # Evaluate
         eval_uci(
@@ -203,5 +222,5 @@ if __name__ == "__main__":
             distortion,
             ckpt_path,
             train_size,
-            gamma = gamma_values[experiment], 
+            gamma=gamma_values[experiment],
         )

@@ -1,2 +1,0 @@
-burnin_epochs: 100
-freeze_backbone: false

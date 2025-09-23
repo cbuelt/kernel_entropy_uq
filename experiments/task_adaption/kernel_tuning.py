@@ -1,10 +1,11 @@
+# Run the active learning kernel choice experiment.
+#
 # This file contains code adapted from:
 # "gnn-post-processing" by hits-mli
 # Repository: https://github.com/hits-mli/gnn-post-processing
 # Paper: Feik et al. Graph Neural Networks and Spatial Information Learning for Post-Processing Ensemble Weather Forecasts (2024)
 
 import os
-import time
 
 import numpy as np
 import pytorch_lightning as L
@@ -74,7 +75,7 @@ def setup_experiment():
     os.makedirs(base_path)
 
     results_path = os.path.join(base_path, f"results/")
-    os.makedirs(results_path, exist_ok = True)
+    os.makedirs(results_path, exist_ok=True)
 
     return config, leadtime, base_path, results_path
 
@@ -132,8 +133,8 @@ def train_ensemble_member(model, ckpt_path, ensemble_id, round, dataloader):
         callbacks=checkpoint_callback,
     )
     if round > 0:  # Load checkpoint from previous round
-        load_ckpt_path = (
-            os.path.join(ckpt_path + f"round_{round-1}/{ensemble_id}.ckpt")
+        load_ckpt_path = os.path.join(
+            ckpt_path + f"round_{round - 1}/{ensemble_id}.ckpt"
         )
         trainer.fit(model=model, train_dataloaders=dataloader, ckpt_path=load_ckpt_path)
     else:
@@ -149,8 +150,7 @@ if __name__ == "__main__":
     NEW_SAMPLES = 200
     MEASURE = "kernel"
     GAMMAS = np.arange(0.1, 2.1, 0.1)
-    criterion = NormalCRPS(reduction = None)
-
+    criterion = NormalCRPS(reduction=None)
 
     # Setup experiment
     config, leadtime, base_path, results_path = setup_experiment()
@@ -165,10 +165,9 @@ if __name__ == "__main__":
         y_test,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=config["batch_size"], shuffle=False, num_workers = 1
+        test_dataset, batch_size=config["batch_size"], shuffle=False, num_workers=1
     )
     n_samples = train_array.shape[0]
-
 
     # Iterate over gammas
     for gamma in GAMMAS:
@@ -181,7 +180,6 @@ if __name__ == "__main__":
         loss = np.empty((RUNS, ROUNDS, 2))
 
         for run in range(RUNS):
-
             # Creat path
             ckpt_base_path = ckpt_gamma_path + f"run_{run}/"
             os.makedirs(ckpt_base_path)
@@ -197,7 +195,6 @@ if __name__ == "__main__":
             pool_index = perm[START_SAMPLES:]
             x_pool = train_array[pool_index]
 
-
             # Create temp dir
             # Reduce data
             for round in range(ROUNDS):
@@ -206,14 +203,22 @@ if __name__ == "__main__":
                 y_train = y_scaler.transform(train_targets[["t2m"]])[train_index]
                 y_pool = y_scaler.transform(train_targets[["t2m"]])[pool_index]
 
-                train_dataset = TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train))
+                train_dataset = TensorDataset(
+                    torch.Tensor(x_train), torch.Tensor(y_train)
+                )
                 pool_dataset = TensorDataset(torch.Tensor(x_pool), torch.Tensor(y_pool))
 
                 train_loader = DataLoader(
-                    train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=1
+                    train_dataset,
+                    batch_size=config["batch_size"],
+                    shuffle=True,
+                    num_workers=1,
                 )
                 pool_loader = DataLoader(
-                    pool_dataset, batch_size=config["batch_size"], shuffle=False, num_workers=1
+                    pool_dataset,
+                    batch_size=config["batch_size"],
+                    shuffle=False,
+                    num_workers=1,
                 )
 
                 # Create checkpoint path
@@ -230,12 +235,15 @@ if __name__ == "__main__":
                     model=model, model_path=ckpt_path, dataloader=test_loader
                 )
                 # Create ensemble prediction
-                mu = test_pred[:,0:1].mean(dim = -1)
-                sigma = torch.sqrt(test_pred[:,1:2].mean(dim = -1) + torch.var(test_pred[:,0:1], dim = -1))
-                test_pred = torch.cat([mu, sigma], dim = 1)
+                mu = test_pred[:, 0:1].mean(dim=-1)
+                sigma = torch.sqrt(
+                    test_pred[:, 1:2].mean(dim=-1)
+                    + torch.var(test_pred[:, 0:1], dim=-1)
+                )
+                test_pred = torch.cat([mu, sigma], dim=1)
                 # Evaluate metrics on test set and log
                 res = criterion(test_pred, y_test)
-                loss[run,round, :] = res.mean(), res.var()
+                loss[run, round, :] = res.mean(), res.var()
 
                 if round < ROUNDS - 1:
                     # Predict train set and get epistemic uncertainty measure
@@ -252,7 +260,6 @@ if __name__ == "__main__":
                     train_index = np.concatenate([train_index, train_indices])
                     pool_index = indices[:-NEW_SAMPLES]
                     x_pool = x_pool[pool_index]
-
 
         np.save(f"{results_path}kernel_{gamma:.1f}.npy", loss)
         os.system("rm -rf " + ckpt_path)
